@@ -12,7 +12,7 @@ struct reaction {
 	//Reagentų skaičius
 	int reactant_count;
 	//Reagentų masyvas
-	int *reactans;
+	int *reactants;
 	//Stechiometrijos koeficientai prie reagentų
 	int *react_stoichs;
 	//Reakcijos laipsniai pagal reagentus
@@ -26,7 +26,7 @@ struct reaction {
 	int *prod_stoichs;
 	//Reakcijos greičio konstanta
 	double k;
-}
+};
 
 struct electrochem {
 	//Pernešamų elektronų skaičius
@@ -34,7 +34,7 @@ struct electrochem {
 	//Reagentų skaičius
 	int reactant_count;
 	//Reagentų masyvas
-	int *reactans;
+	int *reactants;
 	//Stechiometrijos koeficientai prie reagentų
 	int *react_stoichs;
 
@@ -44,7 +44,7 @@ struct electrochem {
 	int *products;
 	//Stechiometrijos koeficientai prie produktų
 	int *prod_stoichs;
-}
+};
 
 struct layer {
 	//Visų medžiagų difuzijos koeficientai sluoksnyje (cm^2/s)
@@ -57,7 +57,7 @@ struct layer {
 	int *reactions;
 	//Sluoksnio storis (cm)
 	double d;
-}
+};
 
 struct universal_bio_params {
 	//Medžiagų skaičius
@@ -74,6 +74,12 @@ struct universal_bio_params {
 	int layer_count;
 	//Biojutiklio sluoksniai
 	struct layer *layers;
+	//Medžiagų, kurioms reikia taikyti nepratekėjimo sąlygą ant elektrodo paviršiaus, skaičius
+	int electrode_neutral_count;
+	//Medžiagos, kurioms reikia taikyti nepratekėjimo sąlygą ant elektrodo paviršiaus
+	int *electrode_neutrals;
+	//Medžiagų koncentracijos tirpale
+	double *init_concs;
 	//Žingsnis pagal laiką (s)
 	double dt;
 	//Į kiek dalių dalinami sluoksniai
@@ -86,6 +92,6 @@ struct universal_bio_params {
 	double resp_t;
 	//Išvedimo failas
 	char *out_file_name;
-}
+};
 
 #endif
