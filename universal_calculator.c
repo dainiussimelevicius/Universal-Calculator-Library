@@ -22,7 +22,17 @@ void calculate(struct universal_bio_params *bio_params, void *ptr, void (*callba
 	double **last, **curr;
 
 	//Žingsnių pagal erdvę masyvas
-	double *space_steps;
+	double *dxs;
+
+	double dx;
+	double dx0;
+	double dx1;
+
+	//Difuzijos koeficientų masyvas
+	double *Ds;
+
+	double D0;
+	double D1;
 
 	//Tinklo taškų skaičius per visus biojutiklio sluoksnius
 	int point_count;
@@ -35,6 +45,12 @@ void calculate(struct universal_bio_params *bio_params, void *ptr, void (*callba
 
 	//Kintamasis nurodo ties kuriuo sluoksniu esame
 	int layer;
+	
+	//Rodyklė į sluoksnį
+	struct layer *layer_ptr;
+
+	//Rodyklė į elektrocheminę reakciją
+	struct electrochem *electrochem_ptr;
 
 	//Kintamasis nurodo ties kuria sluoksnių sandūra esame
 	int interface;
@@ -42,59 +58,101 @@ void calculate(struct universal_bio_params *bio_params, void *ptr, void (*callba
 	//Kintamasis nurodo, kad esame ties sluoksnio kraštu (ties sluoksnių sandūra)
 	int is_boundary;
 
+	int n = bio_params->n;
+	double dt = bio_params->dt;
+	int substance_count = bio_params->substance_count;
+	int layer_count = bio_params->layer_count;
+	int electrode_neutral_count = bio_params->electrode_neutral_count;
+	int electrochem_count = bio_params->electrochem_count;
+	int reaction_count = bio_params->reaction_count;
+	char *out_file_name = bio_params->out_file_name;
+	enum resp_method resp_t_meth = bio_params->resp_t_meth;
+	double min_t = bio_params->min_t;
+	double resp_t = bio_params->resp_t;
+	int *electrode_neutrals = bio_params->electrode_neutrals;
+	struct electrochem *electrochems = bio_params->electrochems;
+	struct layer *layers = bio_params->layers;
+	struct reaction *reactions = bio_params->reactions;
+
+	Ds = malloc(sizeof(*Ds) * substance_count);
+
 	//Apskaičiuojamas tinklo taškų skaičius per visus biojutiklio sluoksnius
-	point_count = bio_params->layer_count * bio_params->n + 1;
+	point_count = layer_count * n + 1;
+
+	dxs = malloc(sizeof(*dxs) * layer_count);
+	for (a = 0; a < layer_count; a++)
+		dxs[a] = layers[a].d / n;
 
 	//Išskiriama atmintis medžiagų koncentracijų masyvams
-	last = alloc_conc_arr(bio_params, point_count);
-	curr = alloc_conc_arr(bio_params, point_count);
+	last = alloc_conc_arr(substance_count, point_count);
+	curr = alloc_conc_arr(substance_count, point_count);
 
 	//Inicializuojami koncentracijų masyvai
 	init_conc_arr(bio_params, last, point_count);
 	init_conc_arr(bio_params, curr, point_count);
 
-	create_file(bio_params->out_file_name);
-	
+	create_file(out_file_name);
+
 	t = 0;
 	do {
-		//Iteruojama per gardelės taškus, skaičiuojamos medžiagų koncentracijos
 		layer = 0;
+		dx = dxs[layer];
+		layer_ptr = layers + layer;
+		for (a = 0; a < substance_count; a++)
+			Ds[a] = layer_ptr->diff_coefs[a];
+
+		//Iteruojama per tinklo taškus, skaičiuojamos medžiagų koncentracijos
 		for (a = 1; a < point_count - 1; a++) {
 			//Nustatome ar tai nėra sluoksnių sandūra
-			is_boundary = (a % bio_params->n == 0);
-			
+			is_boundary = (a % n == 0);
+
 			//Reikšmės sluoksnių sandūrose bus skaičiuojamos vėliau pagal derinimo sąlygas
-			if (!is_boundary)
-				for (b = 0; b < bio_params->substance_count; b++) {
+			if (!is_boundary) {
+				for (b = 0; b < substance_count; b++) {
 					curr[b][a] = last[b][a];
-					curr[b][a] += diffusion_increment(bio_params, a, layer, b, last) * bio_params->dt;
-					curr[b][a] += kinetics_increment(bio_params, a, layer, b, last) * bio_params->dt;
+					curr[b][a] += diffusion_increment(a, Ds[b], dx, b, last) * dt;
+					curr[b][a] += kinetics_increment(reaction_count, reactions, a, layer_ptr, b, last) * dt;
 				}
-			else
+			}
+			else {
 				layer++;
+				dx = dxs[layer];
+				layer_ptr = layers + layer;
+				for (b = 0; b < substance_count; b++)
+					Ds[b] = layer_ptr->diff_coefs[b];
+			}
 		}
 
 		//Sluoksnių sandūroms pritaikomos derinimo sąlygos
-		for (interface = 0; interface < bio_params->layer_count - 1; interface++) {
-			point = bio_params->n * (interface + 1);
-			for (b = 0; b < bio_params->substance_count; b++)
-				curr[b][point] = interface_concentration(bio_params, interface, b, point, curr);
+		for (interface = 0; interface < layer_count - 1; interface++) {
+			point = n * (interface + 1);
+			dx0 = dxs[interface];
+			dx1 = dxs[interface + 1];
+			for (b = 0; b < substance_count; b++) {
+				D0 = layers[interface].diff_coefs[b];
+				D1 = layers[interface + 1].diff_coefs[b];
+				curr[b][point] = interface_concentration(D0, D1, dx0, dx1, b, point, curr);
+			}
 		}
 
 		//Nepratekėjimo sąlygos ant elektrodo paviršiaus
-		for (a = 0; a < bio_params->electrode_neutral_count; a++)
-			curr[bio_params->electrode_neutrals[a]][0] = curr[bio_params->electrode_neutrals[a]][1];
+		for (a = 0; a < electrode_neutral_count; a++)
+			curr[electrode_neutrals[a]][0] = curr[electrode_neutrals[a]][1];
 
 		//Kraštinės sąlygos atitinkančios elektrochemines reakcijas
-		for (a = 0; a < bio_params->electrochem_count; a++)
-			for (b = 0; b < bio_params->electrochems[a].product_count; b++)
-				curr[bio_params->electrochems[a].products[b]][0] = electrochem_concentration(bio_params, a, bio_params->electrochems[a].products[b], curr);
+		for (a = 0; a < electrochem_count; a++) {
+			electrochem_ptr = electrochems + a;
+			for (b = 0; b < electrochem_ptr->product_count; b++)
+				curr[electrochem_ptr->products[b]][0] = electrochem_concentration(electrochem_ptr, layers, electrochem_ptr->products[b], curr);
+		}
 
 		//Srovės tankio skaičiavimas
 		i = 0;
-		for (a = 0; a < bio_params->electrochem_count; a++)
-			for (b = 0; b < bio_params->electrochems[a].reactant_count; b++)
-				i += electrochem_current(bio_params, a, bio_params->electrochems[a].reactants[b], curr);
+		for (a = 0; a < electrochem_count; a++) {
+			electrochem_ptr = electrochems + a;
+			for (b = 0; b < electrochem_ptr->reactant_count; b++)
+				i += electrochem_current(electrochem_ptr, layers, dxs[0], electrochem_ptr->reactants[b], curr);
+		}
 
 		di = fabs(i - last_i);
 		last_i = i;
@@ -104,60 +162,62 @@ void calculate(struct universal_bio_params *bio_params, void *ptr, void (*callba
 
 		//Apskaičiuojamas laikas
 		t++;
-		execution_time = t * bio_params->dt;
+		execution_time = t * dt;
 		
 		//Rezultatų spausdinimas
 		if ((t % INTERVAL) == 0) {
-			append_file(bio_params->out_file_name, i, execution_time);
+			append_file(out_file_name, i, execution_time);
 			if (callback_crunched != NULL)
 				callback_crunched(ptr, (int) execution_time);
 		}
-	} while (!stop_simulation(bio_params, i, di, execution_time));
+	} while (!stop_simulation(resp_t_meth, min_t, resp_t, i, di, execution_time, dt));
 
 	//Atspausdinamas paskutinis taškas
-	append_file(bio_params->out_file_name, i, execution_time);
+	append_file(out_file_name, i, execution_time);
 	if (callback_crunched != NULL)
 		callback_crunched(ptr, (int) execution_time);
 
 	//Atlaisvinama atmintis
-	free_conc_arr(bio_params, last);
-	free_conc_arr(bio_params, curr);
+	free_conc_arr(substance_count, last);
+	free_conc_arr(substance_count, curr);
+	free(dxs);
+	free(Ds);
 }
 
-int stop_simulation(struct universal_bio_params *bio_params, double i, double di, double execution_time)
+inline int stop_simulation(enum resp_method resp_t_meth, double min_t, double resp_t, double i, double di, double execution_time, double dt)
 {
 	//Nustatoma ar tęsti simuliaciją
-	switch (bio_params->resp_t_meth) {
+	switch (resp_t_meth) {
 	case MIN_TIME:
-		if (execution_time < bio_params->min_t) {
+		if (execution_time < min_t) {
 			return 0;
 		}
 		//Jeigu jau pasiekė minimalų laiką, tuomet tikrinama pagal DEFAULT_TIME sąlygas
 	case DEFAULT_TIME:
 		if (i > 1e-30)
-			return ((execution_time / i) * (di / bio_params->dt) <= EPSILON);
+			return ((execution_time / i) * (di / dt) <= EPSILON);
 		else
 			return 0;
 		break;
 	case FIXED_TIME:
-		return (execution_time >= bio_params->resp_t);
+		return (execution_time >= resp_t);
 	}
 }
 
-double **alloc_conc_arr(struct universal_bio_params *bio_params, int point_count)
+double **alloc_conc_arr(int substance_count, int point_count)
 {
 	int a;
 	double **conc_arr;
-	conc_arr = malloc(sizeof(*conc_arr) * bio_params->substance_count);
-	for (a = 0; a < bio_params->substance_count; a++)
+	conc_arr = malloc(sizeof(*conc_arr) * substance_count);
+	for (a = 0; a < substance_count; a++)
 		conc_arr[a] = malloc(sizeof(*conc_arr[a]) * point_count);
 	return conc_arr;
 }
 
-void free_conc_arr(struct universal_bio_params *bio_params, double **conc_arr)
+void free_conc_arr(int substance_count, double **conc_arr)
 {
 	int a;
-	for (a = 0; a < bio_params->substance_count; a++)
+	for (a = 0; a < substance_count; a++)
 		free(conc_arr[a]);
 	free(conc_arr);
 }
@@ -189,14 +249,13 @@ void init_conc_arr(struct universal_bio_params *bio_params, double **conc_arr, i
 		conc_arr[a][point_count - 1] = bio_params->init_concs[a];
 }
 
-double diffusion_increment(struct universal_bio_params *bio_params, int point, int layer, int substance, double **last)
+inline double diffusion_increment(int point, double D, double dx, int substance, double **last)
 {
-	double dx = bio_params->layers[layer].d / bio_params->n;
-	double D = bio_params->layers[layer].diff_coefs[substance];
 	return D * (last[substance][point - 1] - 2 * last[substance][point] + last[substance][point + 1]) / (dx * dx);
 }
 
-double kinetics_increment(struct universal_bio_params *bio_params, int point, int layer, int substance, double **last)
+inline double kinetics_increment(int reaction_count, struct reaction *reactions, \
+	int point, struct layer *layer, int substance, double **last)
 {
 	int a;
 	int b;
@@ -204,15 +263,15 @@ double kinetics_increment(struct universal_bio_params *bio_params, int point, in
 	int product;
 	double increment = 0;
 	double rate;
-	for (a = 0; a < bio_params->reaction_count; a++)
+	for (a = 0; a < reaction_count; a++)
 		//Patikriname ar reakcija vyksta šiame sluoksnyje
-		if (found_in_array(bio_params->layers[layer].reactions, bio_params->layers[layer].reaction_count, a)) {
-			reactant = found_in_array(bio_params->reactions[a].reactants, bio_params->reactions[a].reactant_count, substance);
-			product = found_in_array(bio_params->reactions[a].products, bio_params->reactions[a].product_count, substance);
+		if (found_in_array(layer->reactions, layer->reaction_count, a)) {
+			reactant = found_in_array(reactions[a].reactants, reactions[a].reactant_count, substance);
+			product = found_in_array(reactions[a].products, reactions[a].product_count, substance);
 			if (reactant || product) {
-				rate = bio_params->reactions[a].k;
-				for (b = 0; b < bio_params->reactions[a].reactant_count; b++)
-					rate *= last[bio_params->reactions[a].reactants[b]][point];
+				rate = reactions[a].k;
+				for (b = 0; b < reactions[a].reactant_count; b++)
+					rate *= last[reactions[a].reactants[b]][point];
 				if (reactant)
 					increment -= rate;
 				else
@@ -222,14 +281,9 @@ double kinetics_increment(struct universal_bio_params *bio_params, int point, in
 	return increment;
 }
 
-double interface_concentration(struct universal_bio_params *bio_params, int interface, int substance, int point, double **curr)
+inline double interface_concentration(double D0, double D1, double dx0, double dx1, \
+	int substance, int point, double **curr)
 {
-	int layer0 = interface;
-	int layer1 = interface + 1;
-	double D0 = bio_params->layers[layer0].diff_coefs[substance];
-	double D1 = bio_params->layers[layer1].diff_coefs[substance];
-	double dx0 = bio_params->layers[layer0].d / bio_params->n;
-	double dx1 = bio_params->layers[layer1].d / bio_params->n;
 	const double epsilon = 1e-21;
 
 	//Jeigu šios medžiagos difuzijos koeficientai abiejuose sluoksniuose lygūs 0, tuomet paliekame esamą reikšmę
@@ -239,24 +293,31 @@ double interface_concentration(struct universal_bio_params *bio_params, int inte
 		return curr[substance][point];
 }
 
-double electrochem_concentration(struct universal_bio_params *bio_params, int electrochem, int product, double **curr)
+inline double electrochem_concentration(struct electrochem *electrochem, struct layer *layer0, int product, double **curr)
 {
 	//Išsirenkame pirmąjį elektrocheminės reakcijos reagentą
-	int reactant = bio_params->electrochems[electrochem].reactants[0];
+	int reactant = electrochem->reactants[0];
 	//Reagento difuzijos koeficientas pirmajame sluoksnyje
-	double Dr = bio_params->layers[0].diff_coefs[reactant];
+	double Dr = layer0->diff_coefs[reactant];
 	//Produkto difuzijos koeficientas pirmajame sluoksnyje
-	double Dp = bio_params->layers[0].diff_coefs[product];
+	double Dp = layer0->diff_coefs[product];
 
 	return curr[product][1] + (Dr / Dp) * (curr[reactant][1] - curr[reactant][0]);
 }
 
-double electrochem_current(struct universal_bio_params *bio_params, int electrochem, int reactant, double **curr)
+inline double electrochem_current(struct electrochem *electrochem, struct layer *layer0, double dx0, int reactant, double **curr)
 {
 	//Reagento difuzijos koeficientas pirmajame sluoksnyje
-	double Dr = bio_params->layers[0].diff_coefs[reactant];
-	//dx pirmajame sluoksnyje
-	double dx0 = bio_params->layers[0].d / bio_params->n;
+	double Dr = layer0->diff_coefs[reactant];
 
-	return bio_params->electrochems[electrochem].ne * F * Dr * (curr[reactant][1] - curr[reactant][0]) / dx0;
+	return electrochem->ne * F * Dr * (curr[reactant][1] - curr[reactant][0]) / dx0;
+}
+
+inline int found_in_array(int *array, int length, double value)
+{
+	int a;
+	for (a = 0; a < length; a++)
+		if (array[a] == value)
+			return 1;
+	return 0;
 }

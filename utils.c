@@ -15,15 +15,6 @@ void fill_array(double *array, int length, double value)
 		array[a] = value;
 }
 
-int found_in_array(int *array, int length, double value)
-{
-	int a;
-	for (a = 0; a < length; a++)
-		if (array[a] == value)
-			return 1;
-	return 0;
-}
-
 void create_file(char *file_name)
 {
 	FILE *output_file = fopen(file_name, "w");
