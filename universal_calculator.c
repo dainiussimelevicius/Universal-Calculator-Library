@@ -143,15 +143,16 @@ void calculate(struct universal_bio_params *bio_params, void *ptr, void (*callba
 		for (a = 0; a < electrochem_count; a++) {
 			electrochem_ptr = electrochems + a;
 			for (b = 0; b < electrochem_ptr->product_count; b++)
-				curr[electrochem_ptr->products[b]][0] = electrochem_concentration(electrochem_ptr, layers, electrochem_ptr->products[b], curr);
+				curr[electrochem_ptr->products[b]][0] = electrochem_concentration(electrochem_ptr, layers, \
+					electrochem_ptr->products[b], electrochem_ptr->prod_stoichs[b], curr);
 		}
 
 		//Srovės tankio skaičiavimas
 		i = 0;
 		for (a = 0; a < electrochem_count; a++) {
 			electrochem_ptr = electrochems + a;
-			for (b = 0; b < electrochem_ptr->reactant_count; b++)
-				i += electrochem_current(electrochem_ptr, layers, dxs[0], electrochem_ptr->reactants[b], curr);
+			i += electrochem_current(electrochem_ptr, layers, dxs[0], \
+				electrochem_ptr->reactants[0], electrochem_ptr->react_stoichs[0], curr);
 		}
 
 		di = fabs(i - last_i);
@@ -259,6 +260,8 @@ inline double kinetics_increment(int reaction_count, struct reaction *reactions,
 {
 	int a;
 	int b;
+	int react_idx;
+	int prod_idx;
 	int reactant;
 	int product;
 	double increment = 0;
@@ -266,16 +269,18 @@ inline double kinetics_increment(int reaction_count, struct reaction *reactions,
 	for (a = 0; a < reaction_count; a++)
 		//Patikriname ar reakcija vyksta šiame sluoksnyje
 		if (found_in_array(layer->reactions, layer->reaction_count, a)) {
-			reactant = found_in_array(reactions[a].reactants, reactions[a].reactant_count, substance);
-			product = found_in_array(reactions[a].products, reactions[a].product_count, substance);
+			react_idx = index_in_array(reactions[a].reactants, reactions[a].reactant_count, substance);
+			prod_idx = index_in_array(reactions[a].products, reactions[a].product_count, substance);
+			reactant = (react_idx != -1);
+			product = (prod_idx != -1);
 			if (reactant || product) {
 				rate = reactions[a].k;
 				for (b = 0; b < reactions[a].reactant_count; b++)
-					rate *= last[reactions[a].reactants[b]][point];
+					rate *= pow(last[reactions[a].reactants[b]][point], reactions[a].react_orders[b]);
 				if (reactant)
-					increment -= rate;
+					increment -= rate * reactions[a].react_stoichs[react_idx];
 				else
-					increment += rate;
+					increment += rate * reactions[a].prod_stoichs[prod_idx];
 			}
 		}
 	return increment;
@@ -293,31 +298,42 @@ inline double interface_concentration(double D0, double D1, double dx0, double d
 		return curr[substance][point];
 }
 
-inline double electrochem_concentration(struct electrochem *electrochem, struct layer *layer0, int product, double **curr)
+inline double electrochem_concentration(struct electrochem *electrochem, \
+	struct layer *layer0, int product, int prod_stoich, double **curr)
 {
 	//Išsirenkame pirmąjį elektrocheminės reakcijos reagentą
 	int reactant = electrochem->reactants[0];
+	//Paimame reagento stechiometrijos koeficientą
+	int react_stoich = electrochem->react_stoichs[0];
 	//Reagento difuzijos koeficientas pirmajame sluoksnyje
 	double Dr = layer0->diff_coefs[reactant];
 	//Produkto difuzijos koeficientas pirmajame sluoksnyje
 	double Dp = layer0->diff_coefs[product];
 
-	return curr[product][1] + (Dr / Dp) * (curr[reactant][1] - curr[reactant][0]);
+	return curr[product][1] + (prod_stoich / react_stoich) * (Dr / Dp) * (curr[reactant][1] - curr[reactant][0]);
 }
 
-inline double electrochem_current(struct electrochem *electrochem, struct layer *layer0, double dx0, int reactant, double **curr)
+inline double electrochem_current(struct electrochem *electrochem, struct layer *layer0, \
+	double dx0, int reactant, int react_stoich, double **curr)
 {
+	//Pernešamų elektronų skaičius
+	int ne = electrochem->ne;
 	//Reagento difuzijos koeficientas pirmajame sluoksnyje
 	double Dr = layer0->diff_coefs[reactant];
 
-	return electrochem->ne * F * Dr * (curr[reactant][1] - curr[reactant][0]) / dx0;
+	return (ne * F * Dr * (curr[reactant][1] - curr[reactant][0]) / dx0) / react_stoich;
 }
 
-inline int found_in_array(int *array, int length, double value)
+inline int index_in_array(int *array, int length, int value)
 {
 	int a;
 	for (a = 0; a < length; a++)
 		if (array[a] == value)
-			return 1;
-	return 0;
+			return a;
+	return -1;
+}
+
+inline int found_in_array(int *array, int length, int value)
+{
+	return index_in_array(array, length, value) != -1;
 }

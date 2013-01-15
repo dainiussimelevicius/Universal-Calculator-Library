@@ -13,9 +13,12 @@ inline double kinetics_increment(int reaction_count, struct reaction *reactions,
 	int point, struct layer *layer, int substance, double **last);
 inline double interface_concentration(double D0, double D1, double dx0, double dx1, \
 	int substance, int point, double **curr);
-inline double electrochem_concentration(struct electrochem *electrochem, struct layer *layer0, int product, double **curr);
-inline double electrochem_current(struct electrochem *electrochem, struct layer *layer0, double dx0, int reactant, double **curr);
-inline int found_in_array(int *array, int length, double value); 
+inline double electrochem_concentration(struct electrochem *electrochem, \
+	struct layer *layer0, int product, int prod_stoich, double **curr);
+inline double electrochem_current(struct electrochem *electrochem, struct layer *layer0, \
+	double dx0, int reactant, int react_stoich, double **curr);
+inline int found_in_array(int *array, int length, int value);
+inline int index_in_array(int *array, int length, int value);
 
 #endif
 
