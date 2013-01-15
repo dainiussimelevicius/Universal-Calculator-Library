@@ -24,7 +24,7 @@ struct reaction {
 	int *products;
 	//Stechiometrijos koeficientai prie produktų
 	int *prod_stoichs;
-	//Reakcijos greičio konstanta
+	//Reakcijos greičio konstanta ((mol/cm^3)^x s^-1)
 	double k;
 };
 
@@ -78,7 +78,7 @@ struct universal_bio_params {
 	int electrode_neutral_count;
 	//Medžiagos, kurioms reikia taikyti nepratekėjimo sąlygą ant elektrodo paviršiaus
 	int *electrode_neutrals;
-	//Medžiagų koncentracijos tirpale
+	//Medžiagų koncentracijos tirpale (mol/cm^3)
 	double *init_concs;
 	//Žingsnis pagal laiką (s)
 	double dt;
